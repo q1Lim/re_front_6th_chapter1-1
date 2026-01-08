@@ -1,5 +1,6 @@
 import { Router } from "./router/index.js";
 import { routes } from "./router/routes.js";
+import { isTestEnv } from "./utils/isTestEnv.js";
 
 const enableMocking = () =>
   import("./mocks/browser.js").then(({ worker }) =>
@@ -17,7 +18,7 @@ function main() {
 }
 
 // 애플리케이션 시작
-if (import.meta.env.MODE !== "test") {
+if (!isTestEnv()) {
   enableMocking().then(main);
 } else {
   main();

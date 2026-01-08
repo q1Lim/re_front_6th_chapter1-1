@@ -2,30 +2,34 @@ import { Footer } from "./Footer.js";
 import { Header } from "./Header.js";
 import { getProducts } from "../api/productApi.js";
 import { getQueryParams, setQueryParams } from "../utils/urlParams.js";
+import { isTestEnv } from "../utils/isTestEnv.js";
 
-let isLoading = false;
-let error = null;
-let products = [];
-let totalCount = 0;
-let filters = {
-  page: 1,
-  limit: 20,
-  search: "",
-  category1: "",
-  category2: "",
-  sort: "price_asc",
-  ...getQueryParams(),
+const state = {
+  isLoading: true,
+  error: null,
+  products: [],
+  totalCount: 0,
+  filters: {
+    page: 1,
+    limit: 20,
+    search: "",
+    category1: "",
+    category2: "",
+    sort: "price_asc",
+    ...getQueryParams(),
+  },
 };
 
 export function ProductListPage() {
+  const { isLoading, error, products, totalCount, filters } = state;
   return `
     <div class="min-h-screen bg-gray-50">
       ${Header()}
     <main class="max-w-md mx-auto px-4 py-4">
-      ${Filters({ isLoading: true, filters })}
+      ${Filters({ isLoading, filters })}
         <!-- 상품 목록 -->
         <div class="mb-6">
-          ${ProductGrid()}
+          ${ProductGrid({ isLoading, products, error, totalCount, limit: filters.limit })}
         </div>
     </main>
     ${Footer()}
@@ -34,22 +38,56 @@ export function ProductListPage() {
 }
 
 const fetchProducts = async () => {
-  isLoading = true;
+  state.isLoading = true;
+  state.error = null;
+
+  if (!isTestEnv()) {
+    render();
+  }
   render();
   try {
-    const data = await getProducts(filters);
-    totalCount = data.pagination.total;
-    products = data.products;
+    const data = await getProducts(state.filters);
+    state.totalCount = data.pagination.total;
+    state.products = data.products;
   } catch (err) {
-    console.error("Failed to Fetch", error);
-    error = err;
+    console.error("Failed to Fetch", err);
+    state.error = err;
   } finally {
-    isLoading = false;
+    state.isLoading = false;
     render();
   }
 };
 
+const setUpEventListeners = () => {
+  const { error, filters } = state;
+  if (error) {
+    document.getElementById("retry-button")?.addEventListener("click", fetchProducts);
+  }
+  document.getElementById("limit-select")?.addEventListener("change", (e) => {
+    state.filters.limit = Number(e.target.value);
+    state.filters.page = 1;
+    setQueryParams(state.filters);
+    fetchProducts();
+  });
+  document.getElementById("sort-select")?.addEventListener("change", (e) => {
+    state.filters.sort = e.target.value;
+    state.filters.page = 1;
+    setQueryParams(state.filters);
+    fetchProducts();
+  });
+
+  document.getElementById("search-input")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      filters.search = e.target.value;
+      state.filters.page = 1;
+      setQueryParams(state.filters);
+      fetchProducts();
+    }
+  });
+};
+
 function render() {
+  const { isLoading, error, totalCount, products, filters } = state;
   document.getElementById("root").innerHTML = `
     <div class="min-h-screen bg-gray-50">
       ${Header()}
@@ -57,36 +95,13 @@ function render() {
       ${Filters({ isLoading, filters })}
         <!-- 상품 목록 -->
         <div class="mb-6">
-          ${ProductGrid(isLoading, error, totalCount, products)}
+          ${ProductGrid({ isLoading, error, totalCount, products, limit: filters.limit })}
         </div>
     </main>
     ${Footer()}
     </div>
   `;
-
-  if (error) {
-    document.getElementById("retry-button")?.addEventListener("click", fetchProducts);
-  }
-  document.getElementById("limit-select")?.addEventListener("change", (e) => {
-    filters.limit = Number(e.target.value);
-    filters.page = 1;
-    setQueryParams(filters);
-    fetchProducts();
-  });
-  document.getElementById("sort-select")?.addEventListener("change", (e) => {
-    filters.sort = e.target.value;
-    filters.page = 1;
-    setQueryParams(filters);
-    fetchProducts();
-  });
-  document.getElementById("search-input")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      filters.search = e.target.value;
-      filters.page = 1;
-      setQueryParams(filters);
-      fetchProducts();
-    }
-  });
+  setUpEventListeners();
 }
 
 export function initializeProductListPage() {
@@ -166,7 +181,7 @@ export function Filters({ isLoading, filters }) {
                 <option value="price_asc" ${sort === "price_asc" ? "selected" : ""} >가격 낮은순</option>
                 <option value="price_desc" ${sort === "price_desc" ? "selected" : ""} >가격 높은순</option>
                 <option value="name_asc" ${sort === "name_asc" ? "selected" : ""} >이름순</option>
-                <option value="name_desc ${sort === "name_desc" ? "selected" : ""} ">이름 역순</option>
+                <option value="name_desc" ${sort === "name_desc" ? "selected" : ""} ">이름 역순</option>
                 </select>
             </div>
             </div>
@@ -175,49 +190,36 @@ export function Filters({ isLoading, filters }) {
   `;
 }
 
-function ProductGrid(isLoading, error, totalCount, products) {
-  if (isLoading) {
+function ProductGrid({ isLoading, products, error, totalCount, limit }) {
+  if (error) {
+    return `
+      <div class="text-center py-10">
+        <p class="text-red-500 mb-4">상품을 불러오는데 실패했습니다: ${error.message}</p>
+        <button id="retry-button" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">재시도</button>
+      </div>`;
+  }
+
+  if (isLoading && products.length === 0) {
     return `
     <div>
       <!-- 상품 그리드 -->
       <div class="grid grid-cols-2 gap-4 mb-6" id="products-grid">
       <!-- 로딩 스켈레톤 -->
-      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden animate-pulse">
-          <div class="aspect-square bg-gray-200"></div>
-          <div class="p-3">
-          <div class="h-4 bg-gray-200 rounded mb-2"></div>
-          <div class="h-3 bg-gray-200 rounded w-2/3 mb-2"></div>
-          <div class="h-5 bg-gray-200 rounded w-1/2 mb-3"></div>
-          <div class="h-8 bg-gray-200 rounded"></div>
-          </div>
-      </div>
-      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden animate-pulse">
-          <div class="aspect-square bg-gray-200"></div>
-          <div class="p-3">
-          <div class="h-4 bg-gray-200 rounded mb-2"></div>
-          <div class="h-3 bg-gray-200 rounded w-2/3 mb-2"></div>
-          <div class="h-5 bg-gray-200 rounded w-1/2 mb-3"></div>
-          <div class="h-8 bg-gray-200 rounded"></div>
-          </div>
-      </div>
-      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden animate-pulse">
-          <div class="aspect-square bg-gray-200"></div>
-          <div class="p-3">
-          <div class="h-4 bg-gray-200 rounded mb-2"></div>
-          <div class="h-3 bg-gray-200 rounded w-2/3 mb-2"></div>
-          <div class="h-5 bg-gray-200 rounded w-1/2 mb-3"></div>
-          <div class="h-8 bg-gray-200 rounded"></div>
-          </div>
-      </div>
-      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden animate-pulse">
-          <div class="aspect-square bg-gray-200"></div>
-          <div class="p-3">
-          <div class="h-4 bg-gray-200 rounded mb-2"></div>
-          <div class="h-3 bg-gray-200 rounded w-2/3 mb-2"></div>
-          <div class="h-5 bg-gray-200 rounded w-1/2 mb-3"></div>
-          <div class="h-8 bg-gray-200 rounded"></div>
-          </div>
-      </div>
+      ${Array.from({ length: limit })
+        .map(
+          () => /* HTML */ `
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden animate-pulse">
+              <div class="aspect-square bg-gray-200"></div>
+              <div class="p-3">
+                <div class="h-4 bg-gray-200 rounded mb-2"></div>
+                <div class="h-3 bg-gray-200 rounded w-2/3 mb-2"></div>
+                <div class="h-5 bg-gray-200 rounded w-1/2 mb-3"></div>
+                <div class="h-8 bg-gray-200 rounded"></div>
+              </div>
+            </div>
+          `,
+        )
+        .join("")}
       </div>
       
       <div class="text-center py-4">
@@ -233,13 +235,6 @@ function ProductGrid(isLoading, error, totalCount, products) {
   </div>
 `;
   }
-  if (error) {
-    return `
-      <div class="text-center py-10">
-        <p class="text-red-500 mb-4">상품을 불러오는데 실패했습니다: ${error.message}</p>
-        <button id="retry-button" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">재시도</button>
-      </div>`;
-  }
 
   if (products.length === 0) {
     return `
@@ -249,11 +244,30 @@ function ProductGrid(isLoading, error, totalCount, products) {
     `;
   }
 
+  const footerMessage = isLoading
+    ? `
+            <div class="text-center py-4">
+              <div class="inline-flex items-center">
+                  <svg class="animate-spin h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" 
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span class="text-sm text-gray-600">상품을 불러오는 중...</span>
+              </div>
+            </div>
+`
+    : `
+            <div class="text-center py-4 text-sm text-gray-500">
+              모든 상품을 확인했습니다
+            </div>
+`;
+
   return `
   <div>
             <!-- 상품 개수 정보 -->
             <div class="mb-4 text-sm text-gray-600">
-              총 <span class="font-medium text-gray-900">${totalCount}</span>의 상품
+              총 <span class="font-medium text-gray-900">${totalCount}개</span>의 상품
             </div>
             <!-- 상품 그리드 -->
             <div class="grid grid-cols-2 gap-4 mb-6" id="products-grid">
@@ -291,9 +305,7 @@ function ProductGrid(isLoading, error, totalCount, products) {
               )
               .join("")}
             
-            <div class="text-center py-4 text-sm text-gray-500">
-              모든 상품을 확인했습니다
-            </div>
+            ${footerMessage}
   </div>
   `;
 }
